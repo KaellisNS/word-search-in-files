@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
-	"sync"
 	"word-search-in-files/pkg/handlers/files"
 	"word-search-in-files/pkg/searcher"
 )
@@ -24,30 +23,30 @@ func NewFileController(uploadDir string) *FileController {
 func (fc *FileController) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	file, handler, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "Failed to retrieve file from request", http.StatusBadRequest)
+		http.Error(w, "Не удалось получить файл с запроса", http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
 
 	if err := fc.FileMgr.UploadFile(file, handler.Filename); err != nil {
-		http.Error(w, "Failed to upload file", http.StatusInternalServerError)
+		http.Error(w, "Не удалось загрузить файл", http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte("File uploaded successfully"))
+	w.Write([]byte("Файл загружен"))
 }
 
 func (fc *FileController) ListFilesHandler(w http.ResponseWriter, r *http.Request) {
 	files, err := fc.FileMgr.ListFiles()
 	if err != nil {
-		http.Error(w, "Failed to list files", http.StatusInternalServerError)
+		http.Error(w, "Не удалось получить список файлов", http.StatusInternalServerError)
 		return
 	}
 
 	response, err := json.Marshal(files)
 	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		http.Error(w, "Не удалось маршрутизировать запрос", http.StatusInternalServerError)
 		return
 	}
 
@@ -59,39 +58,41 @@ func (fc *FileController) ListFilesHandler(w http.ResponseWriter, r *http.Reques
 func (fc *FileController) SearchWordHandler(w http.ResponseWriter, r *http.Request) {
 	word := r.URL.Query().Get("word")
 	if word == "" {
-		http.Error(w, "Word parameter is missing", http.StatusBadRequest)
+		http.Error(w, "Нет слова для поиска", http.StatusBadRequest)
 		return
 	}
 
+	// Получаем список файлов
 	files, err := fc.FileMgr.ListFiles()
 	if err != nil {
-		http.Error(w, "Failed to list files", http.StatusInternalServerError)
+		http.Error(w, "Не удалось получить список файлов", http.StatusInternalServerError)
 		return
 	}
 
-	var wg sync.WaitGroup
-	foundFiles := make([]string, 0)
-
-	for _, file := range files {
-		wg.Add(1)
-		go func(file string) {
-			defer wg.Done()
-			err := fc.Search.IndexFile(filepath.Join(fc.FileMgr.UploadDir, file))
-			if err != nil {
-				http.Error(w, "Failed to index file", http.StatusInternalServerError)
-				return
-			}
-			if _, found := fc.Search.Search(word); found {
-				foundFiles = append(foundFiles, file)
-			}
-		}(file)
+	// Формируем полные пути к файлам
+	filePaths := make([]string, len(files))
+	for i, file := range files {
+		filePaths[i] = filepath.Join(fc.FileMgr.UploadDir, file)
 	}
 
-	wg.Wait()
+	// Индексируем файлы
+	err = fc.Search.IndexFiles(filePaths)
+	if err != nil {
+		http.Error(w, "Не удалось проиндексировать файл", http.StatusInternalServerError)
+		return
+	}
 
+	// Ищем файлы по ключевому слову
+	foundFiles, err := fc.Search.Search(word)
+	if err != nil {
+		http.Error(w, "Не удалось найти слово", http.StatusInternalServerError)
+		return
+	}
+
+	// Возвращаем найденные файлы в JSON формате
 	response, err := json.Marshal(foundFiles)
 	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		http.Error(w, "Не удалось маршрутизировать запрос", http.StatusInternalServerError)
 		return
 	}
 

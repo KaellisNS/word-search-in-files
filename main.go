@@ -1,4 +1,4 @@
-package pkg
+package word_search_in_files
 
 import (
 	"net/http"
